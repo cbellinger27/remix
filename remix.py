@@ -100,7 +100,7 @@ class ReMix:
 	def __mix__(self, data, labels):
 		'''Returns mixed inputs, pairs of targets, and lambda'''
 		if self.alpha > 0:
-			lam = np.random.beta(self.alpha, self.beta)
+			lam = np.random.beta(self.alpha, self.alpha)
 		else:
 			lam = 1
 		index = np.random.permutation(data.shape[0])
