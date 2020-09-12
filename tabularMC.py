@@ -1,77 +1,69 @@
-from sklearn.model_selection import RepeatedStratifiedKFold
 import tensorflow as tf
 import pandas as pd
 import numpy as np 
+import remix as ReMix
 from functools import reduce
-import imbalancedMixUp as mixUp
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import StratifiedKFold
-from sklearn.model_selection import StratifiedShuffleSplit
-from sklearn.metrics import classification_report
-from sklearn.metrics import f1_score
 from imblearn.over_sampling import SMOTE, RandomOverSampler
-import imbalancedMixUp as mixUp
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler,MinMaxScaler
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.metrics import geometric_mean_score
-from sklearn.metrics import brier_score_loss, precision_score, recall_score, f1_score, balanced_accuracy_score
-from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedShuffleSplit
-from imblearn.metrics import geometric_mean_score
+from sklearn.metrics import brier_score_loss, precision_score, recall_score, f1_score, balanced_accuracy_score,classification_report
+from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedShuffleSplit,StratifiedKFold
+
 
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
+#DATA GENERATOR TO CREATE MINI-BATCHES FOR TRAINING. THIS FUCTION PERFORMS REMIX ACTIONS BALANCE AND MIX
 class DataGenerator(tf.keras.utils.Sequence):
-    'Generates data for Keras'
-    def __init__(self, data, labels, batch_size=64, shuffle=True, mixUp=None, mixUpType=None):
-        self.y = labels      # array of labels
-        self.X = data        # array of data
-        self.batch_size   = batch_size          # batch size
-        self.shuffle      = shuffle             # shuffle bool
-        self.mixUp = mixUp
-        self.mixUpType = mixUpType
-        self.on_epoch_end()
-    def __len__(self):
-        'Denotes the number of batches per epoch'
-        return int(np.floor(self.X.shape[0] / self.batch_size))
-    def on_epoch_end(self):
-        'Updates indexes after each epoch'
-        self.indexes = np.arange(self.X.shape[0])
-        if self.shuffle:
-            np.random.shuffle(self.indexes)
-    def __getitem__(self, index):
-        'Generate one batch of data'
-        # selects indices of data for next batch
-        indexes = self.indexes[index * self.batch_size : (index + 1) * self.batch_size]
-        # select data and load images
-        batchY = np.array([self.y[k,:] for k in indexes])
-        batchX =  np.array([self.X[k,:] for k in indexes])
-        if 'balance' in self.mixUpType:         # CONSIDER SWICH FROM UP-SAMPLING THE MINORITY CLASSES TO PRIORITY SAMPLING THE EACH BATCH
-            augmentedX = np.ndarray(shape=(0,self.X.shape[1]))
-            augmentedY = np.array([])
-            rsmplFunction = RandomOverSampler()
-            tmpY = np.argmax(batchY,axis=1)
-            clsLabs, clsSizes = np.unique(tmpY, return_counts=True)
-            # if np.argmin(clsSizes) > 0:
-            batchX, batchY = rsmplFunction.fit_resample(batchX, tmpY)
-            cBatchSz = int(np.round(self.batch_size/len(clsLabs)))
-            for c in clsLabs:
-                tmpIdx = np.random.choice(np.where(batchY==c)[0], cBatchSz, replace=np.sum(batchY==c)<cBatchSz)
-                augmentedX = np.concatenate((augmentedX, batchX[tmpIdx,:]))
-                augmentedY = np.append(augmentedY, batchY[tmpIdx])
-            if len(augmentedY) < self.batch_size:
-                idx = np.random.choice(len(batchY), self.batch_size-len(augmentedY))
-                augmentedX = np.concatenate((augmentedX, batchX[idx,:]))
-                augmentedY = np.append(augmentedY, batchY[idx])
-            # print(np.unique(augmentedY, return_counts=True))
-            batchX = augmentedX
-            batchY = tf.keras.utils.to_categorical(augmentedY).astype(int)
-            idx = np.random.choice(batchX.shape[0], np.min([batchX.shape[0],self.batch_size]), replace=False)   # SELECT SUBSET EQUAL IN SIZE TO ORGINAL BATCH SIZE
-            batchX = batchX[idx,:]
-            batchY = batchY[idx,:]
-        x_out, y_out = self.mixUp.sample(batchX, batchY, self.mixUpType)
-        return x_out, y_out
+  'Generates data for Keras'
+  def __init__(self, data, labels, batch_size=64, shuffle=True, remixFunction=None, balanceType=None):
+    self.y = labels                         # array of labels
+    self.X = data                           # array of data
+    self.batch_size   = batch_size          # batch size
+    self.shuffle      = shuffle             # shuffle bool
+    self.remixFunction = remixFunction
+    self.balanceType = balanceType
+    self.on_epoch_end()
+  def __len__(self):
+    'Denotes the number of batches per epoch'
+    return int(np.floor(self.X.shape[0] / self.batch_size))
+  def on_epoch_end(self):
+    'Updates indexes after each epoch'
+    self.indexes = np.arange(self.X.shape[0])
+    if self.shuffle:
+      np.random.shuffle(self.indexes)
+  def __getitem__(self, index):
+    'Generate one batch of data'
+    # selects indices of data for next batch
+    indexes = self.indexes[index * self.batch_size : (index + 1) * self.batch_size]
+    batchY = np.array([self.y[k,:] for k in indexes])
+    batchX =  np.array([self.X[k,:] for k in indexes])
+    if 'remix' in self.balanceType:     # IF WE WANT TO BALANCE THE BATCH
+      augmentedX = np.ndarray(shape=(0,self.X.shape[1]))
+      augmentedY = np.array([])
+      rsmplFunction = RandomOverSampler()
+      tmpY = np.argmax(batchY,axis=1)
+      clsLabs, clsSizes = np.unique(tmpY, return_counts=True)
+      if np.argmin(clsSizes) > 0:
+        batchX, batchY = rsmplFunction.fit_resample(batchX, tmpY)     #PERFORM RANDOM OVERSAMPLING TO BALANCE THE CLASSES IN THE BATCH
+        cBatchSz = int(np.round(self.batch_size/len(clsLabs)))        #DETERMIN HOW MANY EXAMPLES OF EACH CLASS SHOULD BE PRESENT
+        for c in clsLabs:                                             #SELECT THE REQUIRED NUMBER OF SAMPLES FOR EACH CLASS
+          tmpIdx = np.random.choice(np.where(batchY==c)[0], cBatchSz, replace=np.sum(batchY==c)<cBatchSz)
+          augmentedX = np.concatenate((augmentedX, batchX[tmpIdx,:]))
+          augmentedY = np.append(augmentedY, batchY[tmpIdx])
+        if len(augmentedY) < self.batch_size:
+          idx = np.random.choice(len(batchY), self.batch_size-len(augmentedY))
+          augmentedX = np.concatenate((augmentedX, batchX[idx,:]))
+          augmentedY = np.append(augmentedY, batchY[idx])
+        batchX = augmentedX
+        batchY = tf.keras.utils.to_categorical(augmentedY).astype(int)
+        idx = np.random.choice(batchX.shape[0], np.min([batchX.shape[0],self.batch_size]), replace=False)   # SELECT SUBSET EQUAL IN SIZE TO ORGINAL BATCH SIZE
+        batchX = batchX[idx,:]
+        batchY = batchY[idx,:]
+    x_out, y_out = self.remixFunction.sample(batchX, batchY, self.balanceType)
+    return x_out, y_out
 
 
 METRICS = [
@@ -149,23 +141,14 @@ def multiClassBalancedBrier(preds, labs):
 scaler = MinMaxScaler()
 results = []
 
-# file = "segment"
-# file = "abalone"
-# file = "sonar-python"
-# file = "ionosphere-python"
-# file = "cifar_5-python"
 
-# "sonar-pythonBine1vAll.csv",
 fileNames = ["optdigits.csv","landsatSatellite.csv","epilepticSeizure.csv","letter.csv"]
 minClseslst = [[1,2,3],[2,3,4],[1,2],[1,2,3,5,7]]
 
 
-fileNames = ["optdigits.csv"]
-minClseslst = [[1,2,3]]
-
 path = "data/"
 
-btchSz = 128
+btchSz = 64
 
 
 allResults = np.ndarray(shape=(0,12))
@@ -187,6 +170,7 @@ dsNum = 0
 fileIdx = 0
 for file in fileNames:
 	print(file)
+	f = open("tabularMultiClassResults"+file+".txt", "a")
 	minClses = minClseslst[fileIdx]
 	data = pd.read_csv(path+file)  
 	data = data.fillna(data.mean())
@@ -203,8 +187,6 @@ for file in fileNames:
 	minSize = np.min(clsSizes)
 	maxSize = np.max(clsSizes)
 	for imbRatio in [0.05, 0.025, 0.01]:
-	# for imbRatio in [0.1, 0.05, 0.25]:
-	# for imbRatio in [1]:
 		# f.write('\n\n')
 		print("imbalance ration " + str(imbRatio))
 		imbX = X.copy()
@@ -221,11 +203,11 @@ for file in fileNames:
 				imbY = np.delete(imbY, minDel)
 				imbX = np.delete(imbX, minDel, axis=0)
 				print("to size: " + str(np.sum(imbY==c)))
-		mixNames = []
-		for mixUpType, a, b in [['none',0,0],['WeightedBase',0,0],['SMOTE', 0, 0],['basicMix',0.1,0.1],['balanceMix',0.1,0.1],['balanceMix',0.75,5]]:
-		# for mixUpType, a, b in [['basicMix',0.05,0.05],['balanceMix',0.05,0.05]]:	
-		# for mixUpType, a, b in [['SMOTE', 0, 0]]:	
-		# mixNames = np.append(mixNames, mixUpType+str(a)+"_"+str(b))
+		techNames = []
+		imbSizesTxt = []
+		for techType, a in [['none',0],['WeightedBase',0],['SMOTE', 0],['mixup',0.1],['remix',0.1]]:
+			techNames = np.append(techNames, techType+str(a))
+			imbSizesTxt = np.append(imbSizesTxt, str(imbRatio))
 			rskf = RepeatedStratifiedKFold(n_splits=2, n_repeats=10, random_state=36851234)
 			tmpGm = np.array([])
 			tmpFm = np.array([])
@@ -249,30 +231,29 @@ for file in fileNames:
 				y_valEncoded = tf.keras.utils.to_categorical(y_val)
 				y_testEncoded = tf.keras.utils.to_categorical(y_test)
 				y_trainEncoded = tf.keras.utils.to_categorical(y_train2)
-				# print(np.unique(y_train2, return_counts=True))
 				model = get_model(X_train2.shape[1], outDim, hiddenSize)
-				if mixUpType == 'SMOTE':
+				if techType == 'SMOTE':
 					#Batch SMOTE
 					model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
-					mu = mixUp.ImbalanceMixUp(alpha=0.1, beta=0.1)
-					train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, mixUp=mu, mixUpType="SMOTE")
+					mu = ReMix.ReMix(alpha=None)
+					train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="SMOTE")
 					reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 					model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
-				elif mixUpType == 'WeightedBase':
+				elif techType == 'WeightedBase':
 					class_weights = compute_class_weight('balanced', np.unique(y_train2), y_train2)
 					model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
 					reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 					model.fit(X_train2, y_trainEncoded, batch_size=btchSz, epochs=500, class_weight=class_weights, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded),callbacks=[reduce_lr])
-				elif mixUpType == 'basicMix':
+				elif techType == 'mixup':
 					model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
-					mu = mixUp.ImbalanceMixUp(alpha=a, beta=b)
-					train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, mixUp=mu, mixUpType="basicMix")
+					mu = ReMix.ReMix(alpha=a)
+					train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="mixup")
 					reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 					model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
-				elif mixUpType == 'balanceMix':
+				elif techType == 'remix':
 					model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
-					mu = mixUp.ImbalanceMixUp(alpha=a, beta=b)
-					train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, mixUp=mu, mixUpType="balanceMix")
+					mu = ReMix.ReMix(alpha=a)
+					train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="remix")
 					reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 					model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
 				else:
@@ -292,7 +273,8 @@ for file in fileNames:
 			brierBalResults = np.concatenate((brierBalResults, np.array([np.mean(tmpBb), np.std(tmpBb)]).reshape(1,2)),axis=0)
 			brierPosResults = np.concatenate((brierPosResults, np.array([np.mean(tmpBp), np.std(tmpBp)]).reshape(1,2)),axis=0)
 			brierMcResults = np.concatenate((brierMcResults, np.array([np.mean(tmpBmc), np.std(tmpBmc)]).reshape(1,2)),axis=0)
-			datasetsNum = np.append(datasetsNum, dsNum)
+			datasetsNum = np.append(datasetsNum, fileIdx)
+	fileIdx += 1
 	print("fm")
 	print(fmResults)
 	print("gm")
@@ -305,14 +287,12 @@ for file in fileNames:
 	print(brierPosResults)
 	print("Brier Negative")
 	print(np.round(brierNegResults, 3))
-	fileIdx += 1
-	# 	f.write(mixNames)
-	# 	f.write(str(aveRep))
-	# 	f.write('\n')
-	# 	allFmResults = np.concatenate((allFmResults, fmResults.reshape(1,11)))
-	# 	allGmResults = np.concatenate((allGmResults, gmResults.reshape(1,11)))
-	# print(allFmResults)
-	# print(allGmResults)
-	# f.close()
-	# btchSzIdx += 1
+f.write(mixNames)
+f.write(str(aveRep))
+f.write('\n')
+allFmResults = np.concatenate((allFmResults, fmResults.reshape(1,11)))
+allGmResults = np.concatenate((allGmResults, gmResults.reshape(1,11)))
+print(allFmResults)
+print(allGmResults)
+f.close()
 
