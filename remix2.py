@@ -58,8 +58,6 @@ class ReMix:
 		elif mixStyle == "mixup":  # basicMix # Zhang, Hongyi, et al. "mixup: Beyond empirical risk minimization." arXiv preprint arXiv:1710.09412 (2017). 
 			augmentedX, augmentedY, lam = self.__mix__(X, y)
 		elif mixStyle == "remix": # balanceMix # CALL BALANCE, MIX THE BALANCED DATA, AND THEN DOWN SAMPLE TO BATCH SIZE
-			tmpY = np.argmax(y,axis=1)
-			print(np.unique(tmpY, return_counts=True))
 			augmentedX, augmentedY = self.__balance__(X, y)
 			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY, batchSize)
 			augmentedX, augmentedY, lam = self.__mix__(augmentedX, augmentedY)
@@ -77,6 +75,9 @@ class ReMix:
 			balancedX = np.concatenate((balancedX, data[tmpIdx,:]))
 			balancedY = np.append(balancedY, tmpY[tmpIdx])
 		balancedY = tf.keras.utils.to_categorical(balancedY).astype(int)
+		if balancedY.shape[1] == 1:
+			bSize = balancedY.shape[0]
+			balancedY = np.concatenate((balancedY, np.zeros((bSize,1))), axis=1)
 		return balancedX, balancedY
 
 	def __downsample__(self, data, labels, batchSize):
