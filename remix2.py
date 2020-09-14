@@ -63,9 +63,6 @@ class ReMix:
 			augmentedX, augmentedY = self.__balance__(X, y)
 			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY, batchSize)
 			augmentedX, augmentedY, lam = self.__mix__(augmentedX, augmentedY)
-			print(augmentedX.shape)
-			tmpY = np.argmax(augmentedY,axis=1)
-			print(np.unique(tmpY, return_counts=True))
 		return augmentedX, augmentedY
 
 	def __balance__(self, data, labels):
