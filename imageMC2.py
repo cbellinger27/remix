@@ -2,16 +2,16 @@ from sklearn.model_selection import RepeatedStratifiedKFold
 import tensorflow as tf
 import pandas as pd
 import numpy as np 
+import remix2 as ReMix
+import Resampler as Resampler
 from functools import reduce
-import remix2 as Remix
 from sklearn.preprocessing import MinMaxScaler
 from imblearn.over_sampling import SMOTE, RandomOverSampler
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.metrics import geometric_mean_score
-from sklearn.metrics import brier_score_loss, precision_score, recall_score, f1_score, balanced_accuracy_score, roc_auc_score,classification_report
-from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedShuffleSplit,StratifiedKFold
-from imblearn.metrics import geometric_mean_score
+from sklearn.metrics import brier_score_loss, precision_score, recall_score, f1_score, balanced_accuracy_score, classification_report
+from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedShuffleSplit, StratifiedKFold
 
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
@@ -50,7 +50,6 @@ class DataGenerator(tf.keras.utils.Sequence):
     else:     # MIXUP OR REMIX
       return self.remixFunction.sample(batchX, batchY, self.balanceType)
     return batchX, batchY
-
 
 METRICS = [
       tf.keras.metrics.TruePositives(name='tp'),
@@ -217,31 +216,32 @@ for ir in [0.25, 0.1, 0.05]:
 			y_testEncoded = tf.keras.utils.to_categorical(y_test)
 			y_trainEncoded = tf.keras.utils.to_categorical(y_train2)
 			model = get_model(X_train2[0].shape, outDim)
-			if mixUpType == 'SMOTE':
+			if techType == 'SMOTE':
 				#Batch SMOTE
 				model = get_model(X_train2[0].shape, outDim)
 				mu = ReMix.ReMix(alpha=None)
-				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, techType="SMOTE")
+				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="SMOTE")
 				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 				model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
-			elif mixUpType == 'WeightedBase':
+			elif techType == 'WeightedBase':
 				class_weights = compute_class_weight('balanced', np.unique(y_train2), y_train2)
 				model = get_model(X_train2[0].shape, outDim)
 				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 				model.fit(X_train2, y_trainEncoded, batch_size=btchSz, epochs=500, class_weight=class_weights, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded),callbacks=[reduce_lr])
-			elif mixUpType == 'mixup':
-				model = get_model(X_train2[0].shape, outDim)
-				mmu = ReMix.ReMix(alpha=a)
-				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, techType="mixup")
-				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
-				model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
-			elif mixUpType == 'remix':
+			elif techType == 'mixup':
 				model = get_model(X_train2[0].shape, outDim)
 				mu = ReMix.ReMix(alpha=a)
-				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, techType="remix")
+				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="mixup")
+				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
+				model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
+			elif techType == 'remix':
+				model = get_model(X_train2[0].shape, outDim)
+				mu = ReMix.ReMix(alpha=a)
+				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="remix")
 				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 				model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
 			else:
+				model = get_model(X_train2[0].shape, outDim)
 				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 				model.fit(X_train2, y_trainEncoded, batch_size=btchSz, epochs=500, shuffle=True, validation_data=(X_val, y_valEncoded),verbose=0,callbacks=[reduce_lr])
 			y_prob = model.predict(X_test)

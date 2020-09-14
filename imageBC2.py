@@ -3,6 +3,7 @@ import tensorflow as tf
 import pandas as pd
 import numpy as np 
 import remix2 as ReMix
+import Resampler as Resampler
 from functools import reduce
 from sklearn.preprocessing import MinMaxScaler
 from imblearn.over_sampling import SMOTE, RandomOverSampler
@@ -41,13 +42,12 @@ class DataGenerator(tf.keras.utils.Sequence):
     indexes = self.indexes[index * self.batch_size : (index + 1) * self.batch_size]
     batchY = np.array([self.y[k,:] for k in indexes])
     batchX =  np.array([self.X[k,:] for k in indexes])
-    tmpY = np.argmax(batchY,axis=1)
     if 'none' in self.balanceType:     # PLAIN BATCH
     	return batchX, batchY
     elif 'SMOTE' in self.balanceType:     # APPLY SMOTE TO THE BATCH
-      return Resampler.Resampler.smote(batchX, batchY)
+    	return Resampler.Resampler.smote(batchX, batchY)
     else:     # MIXUP OR REMIX
-      return self.remixFunction.sample(batchX, batchY, self.balanceType)
+    	return self.remixFunction.sample(batchX, batchY, self.balanceType)
     return batchX, batchY
 
 
@@ -191,6 +191,7 @@ for ir in [0.05, 0.1, 0.025]:
 				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 				model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
 			else:
+				model = get_model(X_train2[0].shape, outDim)
 				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 				model.fit(X_train2, y_trainEncoded, batch_size=btchSz, epochs=500, shuffle=True, validation_data=(X_val, y_valEncoded),verbose=0,callbacks=[reduce_lr])
 			y_prob = model.predict(X_test)
