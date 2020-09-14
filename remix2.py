@@ -65,7 +65,7 @@ class ReMix:
 
 	def __balance__(self, data, labels):
 		# balancedX = np.ndarray(shape=(0,data.shape[1]))
-		balancedX = np.ndarray(shape=shape=((np.append(0,data.shape[1:]))))
+		balancedX = np.ndarray(shape=((np.append(0,data.shape[1:]))))
 		balancedY = np.array([])
 		rsmplFunction = RandomOverSampler()
 		tmpY = np.argmax(labels,axis=1)
