@@ -1,7 +1,7 @@
 import tensorflow as tf
 import pandas as pd
 import numpy as np 
-import remix as ReMix
+import remix2 as ReMix
 import Resampler as Resampler
 from functools import reduce
 from imblearn.over_sampling import SMOTE, RandomOverSampler
@@ -16,6 +16,7 @@ physical_devices = tf.config.experimental.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
+#DATA GENERATOR TO CREATE MINI-BATCHES FOR TRAINING. THIS FUCTION PERFORMS REMIX ACTIONS BALANCE AND MIX
 class DataGenerator(tf.keras.utils.Sequence):
   'Generates data for Keras'
   def __init__(self, data, labels, batch_size=64, shuffle=True, remixFunction=None, balanceType=None):
@@ -40,30 +41,15 @@ class DataGenerator(tf.keras.utils.Sequence):
     indexes = self.indexes[index * self.batch_size : (index + 1) * self.batch_size]
     batchY = np.array([self.y[k,:] for k in indexes])
     batchX =  np.array([self.X[k,:] for k in indexes])
-    if 'remix' in self.balanceType:     # IF WE WANT TO BALANCE THE BATCH
-      augmentedX = np.ndarray(shape=(0,self.X.shape[1]))
-      augmentedY = np.array([])
-      rsmplFunction = RandomOverSampler()
-      tmpY = np.argmax(batchY,axis=1)
-      clsLabs, clsSizes = np.unique(tmpY, return_counts=True)
-      if np.argmin(clsSizes) > 0:
-        batchX, batchY = rsmplFunction.fit_resample(batchX, tmpY)     #PERFORM RANDOM OVERSAMPLING TO BALANCE THE CLASSES IN THE BATCH
-        cBatchSz = int(np.round(self.batch_size/len(clsLabs)))        #DETERMIN HOW MANY EXAMPLES OF EACH CLASS SHOULD BE PRESENT
-        for c in clsLabs:                                             #SELECT THE REQUIRED NUMBER OF SAMPLES FOR EACH CLASS
-          tmpIdx = np.random.choice(np.where(batchY==c)[0], cBatchSz, replace=np.sum(batchY==c)<cBatchSz)
-          augmentedX = np.concatenate((augmentedX, batchX[tmpIdx,:]))
-          augmentedY = np.append(augmentedY, batchY[tmpIdx])
-        if len(augmentedY) < self.batch_size:
-          idx = np.random.choice(len(batchY), self.batch_size-len(augmentedY))
-          augmentedX = np.concatenate((augmentedX, batchX[idx,:]))
-          augmentedY = np.append(augmentedY, batchY[idx])
-        batchX = augmentedX
-        batchY = tf.keras.utils.to_categorical(augmentedY).astype(int)
-        idx = np.random.choice(batchX.shape[0], np.min([batchX.shape[0],self.batch_size]), replace=False)   # SELECT SUBSET EQUAL IN SIZE TO ORGINAL BATCH SIZE
-        batchX = batchX[idx,:]
-        batchY = batchY[idx,:]
-    x_out, y_out = self.remixFunction.sample(batchX, batchY, self.balanceType)
-    return x_out, y_out
+    tmpY = np.argmax(batchY,axis=1)
+    if 'none' in self.balanceType:     # PLAIN BATCH
+    	return batchX, batchY
+    elif 'SMOTE' in self.balanceType:     # APPLY SMOTE TO THE BATCH
+      return Resampler.Resampler.smote(batchX, batchY)
+    else:     # MIXUP OR REMIX
+      return self.remixFunction.sample(batchX, batchY, self.balanceType)
+    return batchX, batchY
+
 
 
 METRICS = [
@@ -212,7 +198,6 @@ for file in fileNames:
 					reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 					model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
 				else:
-					model = get_model(X_train2[0].shape, outDim)
 					reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 					model.fit(X_train2, y_trainEncoded, batch_size=btchSz, epochs=500, shuffle=True, validation_data=(X_val, y_valEncoded),verbose=0,callbacks=[reduce_lr])
 				y_prob = model.predict(X_test)

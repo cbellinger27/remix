@@ -2,77 +2,54 @@ from sklearn.model_selection import RepeatedStratifiedKFold
 import tensorflow as tf
 import pandas as pd
 import numpy as np 
+import remix as ReMix
+import Resampler as Resampler
 from functools import reduce
-import imbalancedMixUp as mixUp
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import StratifiedKFold
-from sklearn.model_selection import StratifiedShuffleSplit
-from sklearn.metrics import classification_report
-from sklearn.metrics import f1_score
 from imblearn.over_sampling import SMOTE, RandomOverSampler
 from sklearn.preprocessing import StandardScaler
 from sklearn.utils.class_weight import compute_class_weight
 from imblearn.metrics import geometric_mean_score
-from sklearn.metrics import brier_score_loss, precision_score, recall_score, f1_score, balanced_accuracy_score, roc_auc_score
-from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedShuffleSplit
-from imblearn.metrics import geometric_mean_score
+from sklearn.metrics import brier_score_loss, precision_score, recall_score, f1_score, balanced_accuracy_score, classification_report
+from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedShuffleSplit, StratifiedKFold
 
 physical_devices = tf.config.experimental.list_physical_devices('GPU')
 tf.config.experimental.set_memory_growth(physical_devices[0], True)
 
 
+#DATA GENERATOR TO CREATE MINI-BATCHES FOR TRAINING. THIS FUCTION PERFORMS REMIX ACTIONS BALANCE AND MIX
 class DataGenerator(tf.keras.utils.Sequence):
-    'Generates data for Keras'
-    def __init__(self, data, labels, batch_size=64, shuffle=True, remixFunction=None, balanceType=None):
-        self.y = labels      # array of labels
-        self.X = data        # array of data
-        self.batch_size   = batch_size          # batch size
-        self.shuffle      = shuffle             # shuffle bool
-        self.remixFunction = remixFunction
-        self.balanceType = balanceType
-        self.on_epoch_end()
-    def __len__(self):
-        'Denotes the number of batches per epoch'
-        return int(np.floor(self.X.shape[0] / self.batch_size))
-    def on_epoch_end(self):
-        'Updates indexes after each epoch'
-        self.indexes = np.arange(self.X.shape[0])
-        if self.shuffle:
-            np.random.shuffle(self.indexes)
-    def __getitem__(self, index):
-        'Generate one batch of data'
-        # selects indices of data for next batch
-        indexes = self.indexes[index * self.batch_size : (index + 1) * self.batch_size]
-        # select data and load images
-        batchY = np.array([self.y[k,:] for k in indexes])
-        batchX =  np.array([self.X[k,:] for k in indexes])
-        if 'remix' in self.balanceType:         # CONSIDER SWICH FROM UP-SAMPLING THE MINORITY CLASSES TO PRIORITY SAMPLING THE EACH BATCH
-            augmentedX = np.ndarray(shape=(np.append(0,X.shape[1:])))
-            augmentedY = np.array([])
-            rsmplFunction = RandomOverSampler()
-            tmpY = np.argmax(batchY,axis=1)
-            clsLabs, clsSizes = np.unique(tmpY, return_counts=True)
-            if np.argmin(clsSizes) > 0:
-                batchX, batchY = rsmplFunction.fit_resample(batchX.reshape((batchX.shape[0], -1)), tmpY)
-                batchX = batchX.reshape(np.append(batchX.shape[0], augmentedX.shape[1:]))
-                cBatchSz = int(np.round(self.batch_size/len(clsLabs)))
-                
-                for c in clsLabs:
-                    tmpIdx = np.random.choice(np.where(batchY==c)[0], cBatchSz, replace=np.sum(batchY==c)<cBatchSz)
-                    augmentedX = np.concatenate((augmentedX, batchX[tmpIdx,:]))
-                    augmentedY = np.append(augmentedY, batchY[tmpIdx])
-                if len(augmentedY) < self.batch_size:
-                    idx = np.random.choice(len(batchY), self.batch_size-len(augmentedY))
-                    augmentedX = np.concatenate((augmentedX, batchX[idx,:]))
-                    augmentedY = np.append(augmentedY, batchY[idx])
-                batchX = augmentedX
-                batchY = tf.keras.utils.to_categorical(augmentedY).astype(int)
-                idx = np.random.choice(batchX.shape[0], np.min([batchX.shape[0],self.batch_size]), replace=False)   # SELECT SUBSET EQUAL IN SIZE TO ORGINAL BATCH SIZE
-                batchX = batchX[idx,:]
-                batchY = batchY[idx,:]
-        x_out, y_out = self.remixFunction.sample(batchX, batchY, self.mixUpType)
-        return x_out, y_out
-
+  'Generates data for Keras'
+  def __init__(self, data, labels, batch_size=64, shuffle=True, remixFunction=None, balanceType=None):
+    self.y = labels                         # array of labels
+    self.X = data                           # array of data
+    self.batch_size   = batch_size          # batch size
+    self.shuffle      = shuffle             # shuffle bool
+    self.remixFunction = remixFunction
+    self.balanceType = balanceType
+    self.on_epoch_end()
+  def __len__(self):
+    'Denotes the number of batches per epoch'
+    return int(np.floor(self.X.shape[0] / self.batch_size))
+  def on_epoch_end(self):
+    'Updates indexes after each epoch'
+    self.indexes = np.arange(self.X.shape[0])
+    if self.shuffle:
+      np.random.shuffle(self.indexes)
+  def __getitem__(self, index):
+    'Generate one batch of data'
+    # selects indices of data for next batch
+    indexes = self.indexes[index * self.batch_size : (index + 1) * self.batch_size]
+    batchY = np.array([self.y[k,:] for k in indexes])
+    batchX =  np.array([self.X[k,:] for k in indexes])
+    tmpY = np.argmax(batchY,axis=1)
+    if 'none' in self.balanceType:     # PLAIN BATCH
+    	return batchX, batchY
+    elif 'SMOTE' in self.balanceType:     # APPLY SMOTE TO THE BATCH
+      return Resampler.Resampler.smote(batchX, batchY)
+    else:     # MIXUP OR REMIX
+      return self.remixFunction.sample(batchX, batchY, self.balanceType)
+    return batchX, batchY
 
 METRICS = [
       tf.keras.metrics.TruePositives(name='tp'),
@@ -239,31 +216,32 @@ for ir in [0.25, 0.1, 0.05]:
 			y_testEncoded = tf.keras.utils.to_categorical(y_test)
 			y_trainEncoded = tf.keras.utils.to_categorical(y_train2)
 			model = get_model(X_train2[0].shape, outDim)
-			if mixUpType == 'SMOTE':
+			if techType == 'SMOTE':
 				#Batch SMOTE
 				model = get_model(X_train2[0].shape, outDim)
 				mu = ReMix.ReMix(alpha=None)
-				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, techType="SMOTE")
+				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="SMOTE")
 				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 				model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
-			elif mixUpType == 'WeightedBase':
+			elif techType == 'WeightedBase':
 				class_weights = compute_class_weight('balanced', np.unique(y_train2), y_train2)
 				model = get_model(X_train2[0].shape, outDim)
 				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 				model.fit(X_train2, y_trainEncoded, batch_size=btchSz, epochs=500, class_weight=class_weights, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded),callbacks=[reduce_lr])
-			elif mixUpType == 'mixup':
-				model = get_model(X_train2[0].shape, outDim)
-				mmu = ReMix.ReMix(alpha=a)
-				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, techType="mixup")
-				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
-				model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
-			elif mixUpType == 'remix':
+			elif techType == 'mixup':
 				model = get_model(X_train2[0].shape, outDim)
 				mu = ReMix.ReMix(alpha=a)
-				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, techType="remix")
+				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="mixup")
+				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
+				model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
+			elif techType == 'remix':
+				model = get_model(X_train2[0].shape, outDim)
+				mu = ReMix.ReMix(alpha=a)
+				train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="remix")
 				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 				model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
 			else:
+				model = get_model(X_train2[0].shape, outDim)
 				reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 				model.fit(X_train2, y_trainEncoded, batch_size=btchSz, epochs=500, shuffle=True, validation_data=(X_val, y_valEncoded),verbose=0,callbacks=[reduce_lr])
 			y_prob = model.predict(X_test)

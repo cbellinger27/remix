@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow as tf
 import remix as ReMix
+import Resampler as Resampler
 from matplotlib.colors import ListedColormap
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
@@ -98,31 +99,14 @@ class DataGenerator(tf.keras.utils.Sequence):
     indexes = self.indexes[index * self.batch_size : (index + 1) * self.batch_size]
     batchY = np.array([self.y[k,:] for k in indexes])
     batchX =  np.array([self.X[k,:] for k in indexes])
-    if 'remix' in self.balanceType:     # IF WE WANT TO BALANCE THE BATCH
-      augmentedX = np.ndarray(shape=(0,self.X.shape[1]))
-      augmentedY = np.array([])
-      rsmplFunction = RandomOverSampler()
-      tmpY = np.argmax(batchY,axis=1)
-      clsLabs, clsSizes = np.unique(tmpY, return_counts=True)
-      if np.argmin(clsSizes) > 0:
-        batchX, batchY = rsmplFunction.fit_resample(batchX, tmpY)     #PERFORM RANDOM OVERSAMPLING TO BALANCE THE CLASSES IN THE BATCH
-        cBatchSz = int(np.round(self.batch_size/len(clsLabs)))        #DETERMIN HOW MANY EXAMPLES OF EACH CLASS SHOULD BE PRESENT
-        for c in clsLabs:                                             #SELECT THE REQUIRED NUMBER OF SAMPLES FOR EACH CLASS
-          tmpIdx = np.random.choice(np.where(batchY==c)[0], cBatchSz, replace=np.sum(batchY==c)<cBatchSz)
-          augmentedX = np.concatenate((augmentedX, batchX[tmpIdx,:]))
-          augmentedY = np.append(augmentedY, batchY[tmpIdx])
-        if len(augmentedY) < self.batch_size:
-          idx = np.random.choice(len(batchY), self.batch_size-len(augmentedY))
-          augmentedX = np.concatenate((augmentedX, batchX[idx,:]))
-          augmentedY = np.append(augmentedY, batchY[idx])
-        batchX = augmentedX
-        batchY = tf.keras.utils.to_categorical(augmentedY).astype(int)
-        idx = np.random.choice(batchX.shape[0], np.min([batchX.shape[0],self.batch_size]), replace=False)   # SELECT SUBSET EQUAL IN SIZE TO ORGINAL BATCH SIZE
-        batchX = batchX[idx,:]
-        batchY = batchY[idx,:]
-    x_out, y_out = self.remixFunction.sample(batchX, batchY, self.balanceType)
-    return x_out, y_out
-
+    tmpY = np.argmax(batchY,axis=1)
+    if 'none' in self.balanceType:     # PLAIN BATCH
+      return batchX, batchY
+    elif 'SMOTE' in self.balanceType:     # APPLY SMOTE TO THE BATCH
+      return Resampler.Resampler.smote(batchX, batchY)
+    else:     # MIXUP OR REMIX
+      return self.remixFunction.sample(batchX, batchY, self.balanceType)
+    return batchX, batchY
 
 #TRAIN BASELINE MODEL
 model = get_model(X_train.shape[1], 2, 10)
