@@ -291,24 +291,3 @@ geometric_mean_score(y_test, y_pred)
 balanced_accuracy_score(y_test, y_pred)
 multiClassBalancedBrier2(y_prob, y_testEncoded)
 
-#test remix B ############################################################
-model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
-techType = 'remix_b'
-a = 0.2
-mu = ReMix.ReMix(alpha=a)
-
-train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType=techType)
-bX, bY = train_data.__getitem__(0)
-
-tmpY = np.argmax(bY,axis=1)
-print(np.unique(tmpY, return_counts=True))
-
-reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
-model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
-
-y_prob = model.predict(X_test)
-y_pred = np.argmax(y_prob,axis=1)
-f1_score(y_test, y_pred, average='macro')
-geometric_mean_score(y_test, y_pred)
-balanced_accuracy_score(y_test, y_pred)
-multiClassBalancedBrier2(y_prob, y_testEncoded)

@@ -111,15 +111,6 @@ def multiClassBalancedBrier2(preds, labs):
 			mcbbs += mcBrier(preds[idx,:], labs[idx, :])
 	return mcbbs/k
 
-def multiClassBalancedBrier(preds, labs):
-	bbs = 0
-	clsCnt = 0
-	for c in range(labs.shape[1]):
-		clsInstCnt = np.sum(labs[:,c])
-		if clsInstCnt > 0:
-			clsCnt += 1
-			bbs += (np.sum((1 - preds[np.where(labs[:,c]==1),c])**2)/clsInstCnt)
-	return bbs / clsCnt
 
 
 scaler = MinMaxScaler()

@@ -59,10 +59,6 @@ class ReMix:
 			augmentedX, augmentedY, lam = self.__mix__(X, y)
 		elif mixStyle == "remix": # balanceMix # CALL BALANCE, MIX THE BALANCED DATA, AND THEN DOWN SAMPLE TO BATCH SIZE
 			augmentedX, augmentedY = self.__balance__(X, y)
-			augmentedX, augmentedY, lam = self.__mix__(augmentedX, augmentedY)
-			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY, batchSize)
-		elif mixStyle == "remix_b": # balanceMix # CALL BALANCE, MIX THE BALANCED DATA, AND THEN DOWN SAMPLE TO BATCH SIZE
-			augmentedX, augmentedY = self.__balance__(X, y)
 			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY, batchSize)
 			augmentedX, augmentedY, lam = self.__mix__(augmentedX, augmentedY)
 		return augmentedX, augmentedY
