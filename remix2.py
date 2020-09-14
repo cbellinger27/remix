@@ -52,16 +52,20 @@ class ReMix:
 		augmentedX = np.ndarray(shape=(0,X.shape[1]))
 		augmentedY = np.ndarray(shape=(0,y.shape[1]))
 		batchSize  = X.shape[0]
-		print(batchSize)
 		if mixStyle == "balance":  # CALL BALANCE AND DOWN SAMPLE TO BATCH SIZE
 			augmentedX, augmentedY = self.__balance__(X, y)
 			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY, batchSize)
 		elif mixStyle == "mixup":  # basicMix # Zhang, Hongyi, et al. "mixup: Beyond empirical risk minimization." arXiv preprint arXiv:1710.09412 (2017). 
 			augmentedX, augmentedY, lam = self.__mix__(X, y)
 		elif mixStyle == "remix": # balanceMix # CALL BALANCE, MIX THE BALANCED DATA, AND THEN DOWN SAMPLE TO BATCH SIZE
+			tmpY = np.argmax(y,axis=1)
+			print(np.unique(tmpY, return_counts=True))
 			augmentedX, augmentedY = self.__balance__(X, y)
 			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY, batchSize)
 			augmentedX, augmentedY, lam = self.__mix__(augmentedX, augmentedY)
+			print(augmentedX.shape)
+			tmpY = np.argmax(augmentedY,axis=1)
+			print(np.unique(tmpY, return_counts=True))
 		return augmentedX, augmentedY
 
 	def __balance__(self, data, labels):
