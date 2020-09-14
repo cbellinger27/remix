@@ -44,7 +44,7 @@ class DataGenerator(tf.keras.utils.Sequence):
     if 'none' in self.balanceType:     # PLAIN BATCH
     	return batchX, batchY
     elif 'SMOTE' in self.balanceType:     # APPLY SMOTE TO THE BATCH
-    	return Resampler.smote(batchX, batchY)
+    	return Resampler.Resampler.smote(batchX, batchY)
     else:     # MIXUP OR REMIX
     	return self.remixFunction.sample(batchX, batchY, self.balanceType)
     return batchX, batchY

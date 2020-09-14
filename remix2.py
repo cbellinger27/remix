@@ -51,19 +51,20 @@ class ReMix:
 		synClsSize = int(X.shape[0] / numClses) # ASSUME WE WANT BALANCED CLASSES
 		augmentedX = np.ndarray(shape=(0,X.shape[1]))
 		augmentedY = np.ndarray(shape=(0,y.shape[1]))
+		batchSize  = X.shape[0]
 		if mixStyle == "balance":  # CALL BALANCE AND DOWN SAMPLE TO BATCH SIZE
 			augmentedX, augmentedY = self.__balance__(X, y)
-			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY)
+			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY, batchSize)
 		elif mixStyle == "mixup":  # basicMix # Zhang, Hongyi, et al. "mixup: Beyond empirical risk minimization." arXiv preprint arXiv:1710.09412 (2017). 
 			augmentedX, augmentedY, lam = self.__mix__(X, y)
 		elif mixStyle == "remix": # balanceMix # CALL BALANCE, MIX THE BALANCED DATA, AND THEN DOWN SAMPLE TO BATCH SIZE
 			augmentedX, augmentedY = self.__balance__(X, y)
-			augmentedX, augmentedY, lam = self.__mix__(X, y)
-			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY)
+			augmentedX, augmentedY, lam = self.__mix__(augmentedX, augmentedY)
+			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY, batchSize)
 		return augmentedX, augmentedY
 
 	def __balance__(self, data, labels):
-		balancedX = np.ndarray(shape=(0,self.data.shape[1]))
+		balancedX = np.ndarray(shape=(0,data.shape[1]))
 		balancedY = np.array([])
 		rsmplFunction = RandomOverSampler()
 		tmpY = np.argmax(labels,axis=1)
