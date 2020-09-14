@@ -51,49 +51,15 @@ class ReMix:
 		synClsSize = int(X.shape[0] / numClses) # ASSUME WE WANT BALANCED CLASSES
 		augmentedX = np.ndarray(shape=(0,X.shape[1]))
 		augmentedY = np.ndarray(shape=(0,y.shape[1]))
-		if mixStyle == "none":
-			return X, y
-		elif mixStyle == "balance":  # RETURN X, y BECAUSE THE BATCH IS BALANCED BEFORE CALLING REMIX
-			return X, y
+		if mixStyle == "balance":  # CALL BALANCE AND DOWN SAMPLE TO BATCH SIZE
+			augmentedX, augmentedY = self.__balance__(X, y)
+			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY)
 		elif mixStyle == "mixup":  # basicMix # Zhang, Hongyi, et al. "mixup: Beyond empirical risk minimization." arXiv preprint arXiv:1710.09412 (2017). 
 			augmentedX, augmentedY, lam = self.__mix__(X, y)
-		elif mixStyle == "remix": # balanceMix # Mix the balanced batch
+		elif mixStyle == "remix": # balanceMix # CALL BALANCE, MIX THE BALANCED DATA, AND THEN DOWN SAMPLE TO BATCH SIZE
+			augmentedX, augmentedY = self.__balance__(X, y)
 			augmentedX, augmentedY, lam = self.__mix__(X, y)
-		elif mixStyle == "SMOTE": # Chawla, Nitesh V., et al. "SMOTE: synthetic minority over-sampling technique." Journal of artificial intelligence research 16 (2002): 321-357.
-			augmentedX = np.ndarray(shape=(np.append(0,X.shape[1:])))
-			augmentedY = np.array([])
-			allSizesY = np.zeros(y.shape[1])
-			tmpY = np.argmax(y,axis=1)
-			clsLabs, clsSizes = np.unique(tmpY, return_counts=True)
-			allSizesY[clsLabs] = clsSizes
-			if len(clsSizes) > 1:
-				if np.min(clsSizes) < 3:
-					rsmplFunction = RandomOverSampler()
-				else: 
-					rsmplFunction = SMOTE(k_neighbors=np.min([np.min(clsSizes)-1,5]))
-				rsmpX, rsmpY = rsmplFunction.fit_resample(X.reshape((X.shape[0], -1)), tmpY)
-				rsmpX = rsmpX.reshape(np.append(rsmpX.shape[0], X.shape[1:]))
-				tmpIdx = np.random.choice(rsmpX.shape[0], X.shape[0], replace=False)
-				augmentedX = rsmpX[tmpIdx,:]
-				augmentedY = tf.keras.utils.to_categorical(rsmpY[tmpIdx],num_classes=y.shape[1]).astype(int)
-			else:
-				augmentedX = X
-				augmentedY = y
-		elif mixStyle == "rndOver": 
-			augmentedX = np.ndarray(shape=(np.append(0,X.shape[1:])))
-			augmentedY = np.array([])
-			tmpY = np.argmax(y,axis=1)
-			clsLabs, clsSizes = np.unique(tmpY, return_counts=True)
-			if np.min(clsSizes) > 0:
-				rsmplFunction = RandomOverSampler()
-				rsmpX, rsmpY = rsmplFunction.fit_resample(X.reshape((X.shape[0], -1)), tmpY)
-				rsmpX = rsmpX.reshape(np.append(rsmpX.shape[0], X.shape[1:]))
-				tmpIdx = np.random.choice(rsmpX.shape[0], X.shape[0], replace=False)
-				augmentedX = rsmpX[tmpIdx,:]
-				augmentedY = tf.keras.utils.to_categorical(rsmpY[tmpIdx],num_classes=y.shape[1]).astype(int)
-			else:
-				augmentedX = X
-				augmentedY = y
+			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY)
 		return augmentedX, augmentedY
 
 	def __balance__(self, data, labels):
@@ -107,13 +73,14 @@ class ReMix:
 			tmpIdx = np.random.choice(np.where(data==c)[0], cBatchSz, replace=np.sum(tmpY==c)<cBatchSz)
 			balancedX = np.concatenate((balancedX, data[tmpIdx,:]))
 			balancedY = np.append(balancedY, tmpY[tmpIdx])
-		if len(balancedY) < data.shape[0]:
-			idx = np.random.choice(len(batchY), data.shape[0]-len(balancedY))
-			balancedX = np.concatenate((balancedX, batchX[idx,:]))
-			balancedY = np.append(balancedY, batchY[idx])
 		balancedY = tf.keras.utils.to_categorical(balancedY).astype(int)
 		return balancedX, balancedY
 
+	def __downsample__(self, data, labels, batchSize):
+		idx = np.random.choice(data.shape[0], batchSize)
+		data = data[idx,:]
+		labels = labels[idx, :]
+		return data, labels
 
 	def __mix__(self, data, labels):
 		'''Returns mixed inputs, pairs of targets, and lambda'''
