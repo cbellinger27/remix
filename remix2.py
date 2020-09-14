@@ -71,7 +71,7 @@ class ReMix:
 		clsLabs, clsSizes = np.unique(tmpY, return_counts=True)
 		cBatchSz = np.max(clsSizes)      		  						#DETERMIN THE LARGEST CLASS
 		for c in clsLabs:                                             	#SELECT THE REQUIRED NUMBER OF SAMPLES FOR EACH CLASS
-			tmpIdx = np.random.choice(np.where(data==c)[0], cBatchSz, replace=np.sum(tmpY==c)<cBatchSz)
+			tmpIdx = np.random.choice(np.where(tmpY==c)[0], cBatchSz, replace=np.sum(tmpY==c)<cBatchSz)
 			balancedX = np.concatenate((balancedX, data[tmpIdx,:]))
 			balancedY = np.append(balancedY, tmpY[tmpIdx])
 		balancedY = tf.keras.utils.to_categorical(balancedY).astype(int)
