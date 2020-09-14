@@ -52,6 +52,7 @@ class ReMix:
 		augmentedX = np.ndarray(shape=(0,X.shape[1]))
 		augmentedY = np.ndarray(shape=(0,y.shape[1]))
 		batchSize  = X.shape[0]
+		print(batchSize)
 		if mixStyle == "balance":  # CALL BALANCE AND DOWN SAMPLE TO BATCH SIZE
 			augmentedX, augmentedY = self.__balance__(X, y)
 			augmentedX, augmentedY = self.__downsample__(augmentedX, augmentedY, batchSize)
