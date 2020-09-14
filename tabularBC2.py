@@ -2,7 +2,6 @@ import tensorflow as tf
 import pandas as pd
 import numpy as np 
 import remix2 as ReMix
-import Resampler as Resampler
 from functools import reduce
 from imblearn.over_sampling import SMOTE, RandomOverSampler
 from sklearn.preprocessing import StandardScaler,MinMaxScaler
@@ -41,13 +40,15 @@ class DataGenerator(tf.keras.utils.Sequence):
     indexes = self.indexes[index * self.batch_size : (index + 1) * self.batch_size]
     batchY = np.array([self.y[k,:] for k in indexes])
     batchX =  np.array([self.X[k,:] for k in indexes])
+    tmpY = np.argmax(batchY,axis=1)
     if 'none' in self.balanceType:     # PLAIN BATCH
     	return batchX, batchY
     elif 'SMOTE' in self.balanceType:     # APPLY SMOTE TO THE BATCH
-    	return Resampler.Resampler.smote(batchX, batchY)
+      return Resampler.Resampler.smote(batchX, batchY)
     else:     # MIXUP OR REMIX
-    	return self.remixFunction.sample(batchX, batchY, self.balanceType)
+      return self.remixFunction.sample(batchX, batchY, self.balanceType)
     return batchX, batchY
+
 
 
 METRICS = [
@@ -73,7 +74,7 @@ def get_model(inputDim, outputDim, hiddenSize, modelName='best_model'):
     x = tf.keras.layers.Dense(hiddenSize, activation='relu')(x)
     out = tf.keras.layers.Dense(outputDim, activation='softmax')(x)
     model = tf.keras.Model(inputs=inp, outputs=out)
-    model.compile(loss='categorical_crossentropy',
+    model.compile(loss='binary_crossentropy',
                   optimizer=tf.keras.optimizers.Adam(),
                   metrics=METRICS)
     return model
@@ -89,41 +90,18 @@ def brierNeg(pred, negLab=0):
 def balancedBrier(predPos, predNeg, posLab=1, negLab=0):
 	return (brierNeg(predNeg, negLab) + brierPos(predPos, posLab))/2
 
-
-def mcBrier(preds, labs):
-	mcbs = 0
-	n = preds.shape[0]
-	k = labs.shape[1]
-	for p in range(n):
-		for c in range(k):
-			mcbs += (labs[p,c] - preds[p,c])**2
-	return mcbs/(2*n)
-
-
-def multiClassBalancedBrier2(preds, labs):
-	mcbbs = 0
-	k = labs.shape[1]
-	clsCnt=0
-	for c in range(k):
-		idx = np.where(labs[:,c]==1)[0]
-		if len(idx) > 0:
-			clsCnt += 1
-			mcbbs += mcBrier(preds[idx,:], labs[idx, :])
-	return mcbbs/k
-
-
-
 scaler = MinMaxScaler()
 results = []
 
 
-fileNames = ["optdigits.csv","landsatSatellite.csv","epilepticSeizure.csv","letter.csv"]
-minClseslst = [[1,2,3],[2,3,4],[1,2],[1,2,3,5,7]]
-
-
 path = "data/"
 
-btchSz = 64
+btchSzs = [64,64,64,64,32,64,64,64,64] 
+fileNames = ["mustVersion2.csv","segment.csv","landsatSatellite.csv","epilepticSeizure.csv","coil2000.csv", "ozoneOnehr.csv","aps_failure_all.csv"]
+minClseslst = [[0],[1],[1],[1],[0],[0],[-1]]
+minClsSizes = [[0.01, 0.025, 0.05],[0.01, 0.025, 0.05],[0.01, 0.025, 0.05],[0.01, 0.025, 0.05],[0.01, 0.025, 0.05],[0.025, 0.01],[0.01]]
+fileIdx = 0
+
 
 
 allResults = np.ndarray(shape=(0,12))
@@ -134,19 +112,19 @@ fmResultsAll       = np.ndarray(shape=(0,11))
 gmResultsAll       = np.ndarray(shape=(0,11))
 fmResults = np.ndarray(shape=(0,2))
 gmResults = np.ndarray(shape=(0,2))
-baResults = np.ndarray(shape=(0,2))
 brierPosResults = np.ndarray(shape=(0,2))
-brierMcResults = np.ndarray(shape=(0,2))
+brierNegResults = np.ndarray(shape=(0,2))
 brierBalResults = np.ndarray(shape=(0,2))
 datasetsNum = np.array([])
 minSizes = np.array([])
-dsNum = 0
 
-fileIdx = 0
+
 for file in fileNames:
 	print(file)
-	f = open("tabularMultiClassResults"+file+".txt", "a")
-	minClses = minClseslst[fileIdx]
+	f = open("tabularBinaryResults"+file+".txt", "a")
+	techNames = []
+	imbSizesTxt = []
+	btchSz = btchSzs[fileIdx]
 	data = pd.read_csv(path+file)  
 	data = data.fillna(data.mean())
 	X = data.to_numpy()
@@ -155,40 +133,26 @@ for file in fileNames:
 	X = X[:,0:X.shape[1]-1].astype(float)
 	clsLabs, clsSizes = np.unique(y, return_counts=True)
 	outDim    = len(np.bincount(y))
-	hiddenSize = int(2 * ((X.shape[1]+outDim)/0.75))
-	maxClsIdx = np.argmax(clsSizes)
-	minClsIdx = np.argmin(clsSizes)
-	majSize = np.max(clsSizes)
-	minSize = np.min(clsSizes)
+	hiddenSize = int(2 * ((X.shape[1]+outDim)/3))
+	maxClsId = np.argmax(clsSizes)
+	minClsId = np.argmin(clsSizes)
 	maxSize = np.max(clsSizes)
-	for imbRatio in [0.05, 0.025, 0.01]:
-		# f.write('\n\n')
-		print("imbalance ration " + str(imbRatio))
-		imbX = X.copy()
-		imbY = y.copy()
-		for c in minClses:
-			print("min class adjusted from size: " + str(np.sum(imbY==c)) + " with maj class size: " + str(majSize) + " and IR: " + str(imbRatio))
-			minIdx = np.where(imbY==c)[0]
-			if len(minIdx) < int(majSize * imbRatio):
-				sbsMinIdx = np.random.choice(minIdx, int(majSize * imbRatio), replace=True)
-			else:
-				sbsMinIdx = np.random.choice(minIdx, int(majSize * imbRatio), replace=False)
-			minDel = np.setdiff1d(minIdx, sbsMinIdx)
-			if len(minDel) > 0:
-				imbY = np.delete(imbY, minDel)
-				imbX = np.delete(imbX, minDel, axis=0)
-				print("to size: " + str(np.sum(imbY==c)))
-		techNames = []
-		imbSizesTxt = []
-		for techType, a in [['none',0],['WeightedBase',0],['SMOTE', 0],['mixup',0.1],['remix',0.1]]:
+	minSize = np.min(clsSizes)
+	for imbRatio in minClsSizes[fileIdx]:
+		minIdx = np.where(y==minClsId)[0]
+		sbsMinIdx = np.random.choice(minIdx, int(maxSize * imbRatio),replace=False)
+		minDel = np.setdiff1d(minIdx, sbsMinIdx)
+		imbY = np.delete(y, minDel)
+		imbX = np.delete(X, minDel, axis=0)
+		for techType, a in [['none',0],['WeightedBase',0],['SMOTE', 0],['mixup',0.1],['remix',0.1]]:	
 			techNames = np.append(techNames, techType+str(a))
 			imbSizesTxt = np.append(imbSizesTxt, str(imbRatio))
-			rskf = RepeatedStratifiedKFold(n_splits=2, n_repeats=10, random_state=36851234)
+			rskf = RepeatedStratifiedKFold(n_splits=2, n_repeats=3, random_state=36851234)
+			# rskf = RepeatedStratifiedKFold(n_splits=2, n_repeats=10, random_state=36851234)
 			tmpGm = np.array([])
 			tmpFm = np.array([])
-			tmpBa  = np.array([])
 			tmpBp = np.array([])
-			tmpBmc = np.array([])
+			tmpBn = np.array([])
 			tmpBb = np.array([])
 			for train_index, test_index in rskf.split(imbX, imbY):
 				X_train, X_test = imbX[train_index, :], imbX[test_index, :]
@@ -206,27 +170,28 @@ for file in fileNames:
 				y_valEncoded = tf.keras.utils.to_categorical(y_val)
 				y_testEncoded = tf.keras.utils.to_categorical(y_test)
 				y_trainEncoded = tf.keras.utils.to_categorical(y_train2)
+				print(np.unique(y_train2, return_counts=True))
 				model = get_model(X_train2.shape[1], outDim, hiddenSize)
 				if techType == 'SMOTE':
 					#Batch SMOTE
-					model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
+					model = get_model(X_train.shape[1], 2, hiddenSize)
 					mu = ReMix.ReMix(alpha=None)
 					train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="SMOTE")
 					reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 					model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
 				elif techType == 'WeightedBase':
 					class_weights = compute_class_weight('balanced', np.unique(y_train2), y_train2)
-					model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
+					model = get_model(X_train.shape[1], 2, hiddenSize)
 					reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 					model.fit(X_train2, y_trainEncoded, batch_size=btchSz, epochs=500, class_weight=class_weights, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded),callbacks=[reduce_lr])
 				elif techType == 'mixup':
-					model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
+					model = get_model(X_train.shape[1], 2, hiddenSize)
 					mu = ReMix.ReMix(alpha=a)
 					train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="mixup")
 					reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
 					model.fit(train_data, epochs=500, shuffle=True,verbose=0,validation_data=(X_val, y_valEncoded), callbacks=[reduce_lr])
 				elif techType == 'remix':
-					model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
+					model = get_model(X_train.shape[1], 2, hiddenSize)
 					mu = ReMix.ReMix(alpha=a)
 					train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType="remix")
 					reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(monitor='loss', factor=0.2, patience=5, min_lr=1e-5)
@@ -238,35 +203,33 @@ for file in fileNames:
 				y_pred = np.argmax(y_prob,axis=1)
 				tmpFm = np.append(tmpFm, f1_score(y_test, y_pred, average='macro'))
 				tmpGm = np.append(tmpGm, geometric_mean_score(y_test, y_pred))
-				tmpBa = np.append(tmpFm, balanced_accuracy_score(y_test, y_pred))
-				tmpBmc = np.append(tmpBmc, mcBrier(y_prob, y_testEncoded))
-				tmpBb = np.append(tmpBb, multiClassBalancedBrier2(y_prob, y_testEncoded))
-				tmpBp = np.append(tmpBp, multiClassBalancedBrier2(y_prob[:,minClseslst[0]], y_testEncoded[:,minClseslst[0]]))
+				tmpBp = np.append(tmpBb, brierPos(y_prob[np.where(y_test==1),1]))
+				tmpBn = np.append(tmpBn, brierNeg(y_prob[np.where(y_test==0),0], negLab=1))
+				tmpBb = np.append(tmpBb, balancedBrier(y_prob[np.where(y_test==minClsId),1], y_prob[np.where(y_test==maxClsId),1], posLab=1, negLab=1))
 			fmResults = np.concatenate((fmResults, np.array([np.mean(tmpFm), np.std(tmpFm)]).reshape(1,2)),axis=0)
 			gmResults = np.concatenate((gmResults, np.array([np.mean(tmpGm), np.std(tmpGm)]).reshape(1,2)),axis=0)
-			baResults = np.concatenate((baResults, np.array([np.mean(tmpBa), np.std(tmpBa)]).reshape(1,2)),axis=0)
-			brierBalResults = np.concatenate((brierBalResults, np.array([np.mean(tmpBb), np.std(tmpBb)]).reshape(1,2)),axis=0)
 			brierPosResults = np.concatenate((brierPosResults, np.array([np.mean(tmpBp), np.std(tmpBp)]).reshape(1,2)),axis=0)
-			brierMcResults = np.concatenate((brierMcResults, np.array([np.mean(tmpBmc), np.std(tmpBmc)]).reshape(1,2)),axis=0)
+			brierNegResults = np.concatenate((brierNegResults, np.array([np.mean(tmpBn), np.std(tmpBn)]).reshape(1,2)),axis=0)
+			brierBalResults = np.concatenate((brierBalResults, np.array([np.mean(tmpBb), np.std(tmpBb)]).reshape(1,2)),axis=0)
 			datasetsNum = np.append(datasetsNum, fileIdx)
-	fileIdx += 1
-	print("fm")
-	print(fmResults)
-	print("gm")
-	print(gmResults)
-	print("Ba")
-	print(baResults)
-	print("Brier Balanced")
-	print(brierBalResults)
-	print("Brier Positive")
-	print(brierPosResults)
-	print("Brier Negative")
-	print(np.round(brierNegResults, 3))
-f.write(mixNames)
+	fileIdx += 1	
+print("fm")
+print(fmResults)
+print("gm")
+print(gmResults)
+print("Brier Balanced")
+print(brierBalResults)
+print("Brier Positive")
+print(brierPosResults)
+print("Brier Negative")
+print(np.round(brierNegResults, 3))
+f.write(techNames)
+f.write(imbSizesTxt)
 f.write(str(aveRep))
 f.write('\n')
-allFmResults = np.concatenate((allFmResults, fmResults.reshape(1,11)))
-allGmResults = np.concatenate((allGmResults, gmResults.reshape(1,11)))
+details = np.concatenate((techNames, imbSizesTxt)).reshape(2,18)
+allFmResults = np.concatenate((allFmResults, fmResults.reshape(1,18)))
+allGmResults = np.concatenate((allGmResults, gmResults.reshape(1,18)))
 print(allFmResults)
 print(allGmResults)
 f.close()

@@ -41,15 +41,12 @@ class DataGenerator(tf.keras.utils.Sequence):
     indexes = self.indexes[index * self.batch_size : (index + 1) * self.batch_size]
     batchY = np.array([self.y[k,:] for k in indexes])
     batchX =  np.array([self.X[k,:] for k in indexes])
+    tmpY = np.argmax(batchY,axis=1)
     if 'none' in self.balanceType:     # PLAIN BATCH
     	return batchX, batchY
     elif 'SMOTE' in self.balanceType:     # APPLY SMOTE TO THE BATCH
-      tmpY = np.argmax(batchY,axis=1)
-      #print(np.unique(tmpY, return_counts=True))
       return Resampler.Resampler.smote(batchX, batchY)
     else:     # MIXUP OR REMIX
-      tmpY = np.argmax(batchY,axis=1)
-      #print(np.unique(tmpY, return_counts=True))
       return self.remixFunction.sample(batchX, batchY, self.balanceType)
     return batchX, batchY
 
@@ -77,7 +74,7 @@ def get_model(inputDim, outputDim, hiddenSize, modelName='best_model'):
     x = tf.keras.layers.Dense(hiddenSize, activation='relu')(x)
     out = tf.keras.layers.Dense(outputDim, activation='softmax')(x)
     model = tf.keras.Model(inputs=inp, outputs=out)
-    model.compile(loss='categorical_crossentropy',
+    model.compile(loss='binary_crossentropy',
                   optimizer=tf.keras.optimizers.Adam(),
                   metrics=METRICS)
     return model
@@ -123,7 +120,7 @@ minSizes = np.array([])
 
 
 file = fileNames[0]
-minClses = minClseslst[fileIdx]
+btchSz = btchSzs[fileIdx]
 data = pd.read_csv(path+file)  
 data = data.fillna(data.mean())
 X = data.to_numpy()
@@ -132,14 +129,13 @@ y = y.astype(int)
 X = X[:,0:X.shape[1]-1].astype(float)
 clsLabs, clsSizes = np.unique(y, return_counts=True)
 outDim    = len(np.bincount(y))
-hiddenSize = int(2 * ((X.shape[1]+outDim)/0.75))
-maxClsIdx = np.argmax(clsSizes)
-minClsIdx = np.argmin(clsSizes)
-majSize = np.max(clsSizes)
-minSize = np.min(clsSizes)
+hiddenSize = int(2 * ((X.shape[1]+outDim)/3))
+maxClsId = np.argmax(clsSizes)
+minClsId = np.argmin(clsSizes)
 maxSize = np.max(clsSizes)
+minSize = np.min(clsSizes)
 
-imbRatio = minClsSizes[fileIdx]:
+imbRatio = minClsSizes[fileIdx][0]
 minIdx = np.where(y==minClsId)[0]
 sbsMinIdx = np.random.choice(minIdx, int(maxSize * imbRatio),replace=False)
 minDel = np.setdiff1d(minIdx, sbsMinIdx)
@@ -185,7 +181,7 @@ y_pred = np.argmax(y_prob,axis=1)
 f1_score(y_test, y_pred, average='macro')
 geometric_mean_score(y_test, y_pred)
 balanced_accuracy_score(y_test, y_pred)
-multiClassBalancedBrier2(y_prob, y_testEncoded)
+balancedBrier(y_prob[np.where(y_test==minClsId),1], y_prob[np.where(y_test==maxClsId),1], posLab=1, negLab=1)
 
 #test mixup ############################################################
 model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
@@ -207,12 +203,12 @@ y_pred = np.argmax(y_prob,axis=1)
 f1_score(y_test, y_pred, average='macro')
 geometric_mean_score(y_test, y_pred)
 balanced_accuracy_score(y_test, y_pred)
-multiClassBalancedBrier2(y_prob, y_testEncoded)
+balancedBrier(y_prob[np.where(y_test==minClsId),1], y_prob[np.where(y_test==maxClsId),1], posLab=1, negLab=1)
 
 #test remix ############################################################
 model = get_model(X_train.shape[1], y_trainEncoded.shape[1], hiddenSize)
 techType = 'remix'
-a = 0.2
+a = 0.4
 mu = ReMix.ReMix(alpha=a)
 
 train_data = DataGenerator(X_train2, y_trainEncoded, batch_size=btchSz, remixFunction=mu, balanceType=techType)
@@ -228,8 +224,7 @@ y_prob = model.predict(X_test)
 y_pred = np.argmax(y_prob,axis=1)
 f1_score(y_test, y_pred, average='macro')
 geometric_mean_score(y_test, y_pred)
-balanced_accuracy_score(y_test, y_pred)
-multiClassBalancedBrier2(y_prob, y_testEncoded)
+balancedBrier(y_prob[np.where(y_test==minClsId),1], y_prob[np.where(y_test==maxClsId),1], posLab=1, negLab=1)
 
 
 
